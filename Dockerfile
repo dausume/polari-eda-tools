@@ -10,23 +10,36 @@
 #                             noble package (8.3.105) is older than the sky130A tech file requires (>= 8.3.411)
 #   netgen-lvs                GPL "any version"             layout-vs-schematic (lod-3c; binary: netgen-lvs)
 #   ciel                      Apache-2.0                    fetches a BUILT open PDK (sky130A) at a pinned version
+#   OpenSTA                   GPL-3.0                       static timing (the openroad/opensta binary, copied)
 #
 #   docker build -t polari-eda-tools:noble .
 #   ./fetch-pdk.sh                  # sky130A (sc_hd + fd_pr only) into $POLARI_PDK_ROOT (never in git, never in the image)
 #   docker run --rm -v <work>:/w -w /w -v $POLARI_PDK_ROOT:/pdk -e PDK_ROOT=/pdk polari-eda-tools:noble <tool> …
+# OpenSTA (GPL-3.0, a separate process) comes from the openroad/opensta image — the same binary the suite has
+# always timed with — copied with the one library noble does not ship (tclreadline is in apt; the binary is
+# jammy-built and runs on noble's newer glibc). One image = every engine the compute ladder names.
+FROM openroad/opensta AS opensta
+
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf picolibc-riscv64-unknown-elf \
         yosys verilator iverilog nextpnr-ice40 fpga-icestorm \
-        netgen-lvs tcl tk tcl-dev tk-dev libcairo2 libcairo2-dev libx11-dev libglu1-mesa-dev libgl1-mesa-dev \
+        netgen-lvs tcl tk tcl-dev tk-dev tclreadline libreadline8 libcairo2 libcairo2-dev libx11-dev libglu1-mesa-dev libgl1-mesa-dev \
         build-essential git m4 csh python3 python3-pip ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --no-cache-dir --break-system-packages ciel==3.0.0
+    && pip3 install --no-cache-dir --break-system-packages ciel==3.0.0 falcon gunicorn
+COPY --from=opensta /OpenSTA/build/sta /usr/local/bin/sta
 ARG MAGIC_TAG=8.3.684
 RUN git clone --depth 1 --branch ${MAGIC_TAG} https://github.com/RTimothyEdwards/magic /tmp/magic \
     && cd /tmp/magic && ./configure --prefix=/usr/local >/tmp/magic-configure.log 2>&1 \
     && make -j"$(nproc)" >/tmp/magic-make.log 2>&1 && make install >/dev/null \
     && cp /tmp/magic/LICENSE /usr/local/share/doc-magic-LICENSE && rm -rf /tmp/magic
 ENV PDK_ROOT=/pdk
+# the engines WORKER (the Polari engines pattern: /capability + /run, argv only, files round-trip) — the default
+# command when the image is deployed as a service (docker-compose.eda-engines.yml); `docker run … <tool>` still
+# works for a local device that has the image but no worker.
+COPY eda_engines_service.py /srv/eda_engines_service.py
 WORKDIR /w
+EXPOSE 9800
+CMD ["gunicorn", "-b", "0.0.0.0:9800", "-w", "2", "-t", "1800", "--chdir", "/srv", "eda_engines_service:app"]

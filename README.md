@@ -10,6 +10,12 @@ apart from the framework's rows and readings (the framework only ever names the 
     # the framework's lod scripts use these knobs:
     POLARI_EDA_IMAGE=polari-eda-tools:noble   POLARI_PDK_ROOT=~/.cache/polari-lod/pdk   POLARI_OPENSTA_IMAGE=openroad/opensta
 
+It is ALSO an engines WORKER (the Polari engines pattern — cnt-engines / msci-engines / cad-engines): the image's
+default command serves `GET /capability` + `POST /run` (argv only, files round-trip) on :9800;
+`polari-rf-node/docker-compose.eda-engines.yml` deploys it, `pol allocate computelod.engines <instance>` places it,
+and the framework resolves every engine through `computelod/custom/eda_engines.py` (EDA_ENGINES_URL → local binary
+→ local image → topology provider → refusal). The device that runs the worker holds the PDK volume.
+
 `flows/` holds the tool scripts the framework drives (`cell_check.tcl`: magic DRC + parasitic extraction of one
 cell from the PDK's own `.mag`; `lvs.sh`: netgen layout-vs-schematic against the PDK's schematic netlist).
 `LICENSES.md` is the audit — every tool is invoked as a separate process; nothing is linked or vendored.

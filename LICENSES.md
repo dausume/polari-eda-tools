@@ -17,6 +17,8 @@ this audit. Verified 2026-09-24 against the Debian `copyright` files shipped in 
 | magic | source, tag 8.3.684 (RTimothyEdwards/magic) | UC Berkeley permissive ("Permission to use, copy, modify, and distribute … without fee") + Juniper permissive parts | upstream LICENSE; Debian copyright of the 8.3.105 package (BSD-style, Juniper) | tool — fine; permissive |
 | netgen-lvs | noble apt 1.5.133 | GNU GPL "any version" (Files: *); parts public-domain / MIT-with-X-exception / GPL-2+ | Debian copyright: "under the terms of the GNU General Public License … (any version)" | tool — fine; GPLv3-compatible |
 | ciel | PyPI 3.0.0 (fossi-foundation/ciel) | Apache-2.0 | wheel METADATA | tool — fine; one-way compatible into GPLv3 |
+| OpenSTA | the `openroad/opensta` image's `/OpenSTA/build/sta` binary, copied (multi-stage) | GPL-3.0 | The-OpenROAD-Project/OpenSTA LICENSE | tool — fine; a separate process, same binary the suite has timed with since lod-2 |
+| falcon, gunicorn (the worker's HTTP) | pip | Apache-2.0 / MIT | PyPI | fine |
 | open_pdks / sky130A (built PDK, fetched at run time, NEVER in git or the image) | ciel version 1689ac3f2dc763876eaf967227c7dfe831b031ae | Apache-2.0 (open_pdks; SkyWater PDK) | RTimothyEdwards/open_pdks + google/skywater-pdk licence fields; SPDX headers on the cell files read in lod-3 | data — fine; cited by version + sha256 in every report |
 | Ubuntu 24.04 base | ubuntu:24.04 | various (Debian/Ubuntu) | — | base image |
 

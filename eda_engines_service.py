@@ -54,6 +54,20 @@ def _version(engine):
         return 'present'
 
 
+def _process_block():
+    """res-3 contract: this worker process's resident / peak RSS from /proc/self/status (residentMb, peakMb)."""
+    out = {}
+    try:
+        for line in open('/proc/self/status'):
+            if line.startswith('VmRSS:'):
+                out['residentMb'] = round(int(line.split()[1]) / 1024.0, 1)
+            elif line.startswith('VmHWM:'):
+                out['peakMb'] = round(int(line.split()[1]) / 1024.0, 1)
+    except Exception:
+        pass
+    return out
+
+
 def _pdk():
     tech = os.path.join(PDK_ROOT, 'sky130A', 'libs.tech', 'magic', 'sky130A.tech')
     vp = os.path.join(PDK_ROOT, '.polari-pdk-version')
@@ -61,7 +75,7 @@ def _pdk():
 
 
 def _capability():
-    return {'worker': 'eda-engines', 'engines': {e: {'available': bool(_which(e)), 'version': _version(e), 'binary': ENGINES[e]} for e in ENGINES}, 'pdk': _pdk(),
+    return {'resources': {'ramMb': 600, 'minThreads': 1, 'threadCeiling': 2, 'cpuBenefit': 'sublinear', 'imageMb': 2560, 'fidelity': 'declared', 'note': 'res-2 block (rc-1): declared floor of the eda toolchain worker; measured peaks come from the flows\' cgroup meters'}, 'worker': 'eda-engines', 'engines': {e: {'available': bool(_which(e)), 'version': _version(e), 'binary': ENGINES[e]} for e in ENGINES}, 'pdk': _pdk(),
             'protocol': 'POST /run {engine, args, files, files_b64, env, timeout} — argv only, files round-trip'}
 
 
@@ -94,7 +108,7 @@ class SystemInfoResource:
                     info[parts[0].rstrip(':')] = int(parts[1]) * 1024
         except Exception:
             pass
-        resp.media = {'ok': True, 'worker': 'eda-engines', 'cpus': os.cpu_count(), 'memTotalBytes': info.get('MemTotal', 0), 'memAvailableBytes': info.get('MemAvailable', 0), 'platform': platform.platform()}
+        resp.media = {'ok': True, 'worker': 'eda-engines', 'process': _process_block(), 'cpus': os.cpu_count(), 'memTotalBytes': info.get('MemTotal', 0), 'memAvailableBytes': info.get('MemAvailable', 0), 'platform': platform.platform()}
 
 
 class RunResource:
@@ -123,6 +137,8 @@ class RunResource:
             for k, v in (body.get('env') or {}).items():
                 if str(k).isidentifier():
                     env[str(k)] = str(v)
+            import resource as _res, time as _time
+            _c0 = _res.getrusage(_res.RUSAGE_CHILDREN); _t0 = _time.perf_counter()
             try:
                 run = subprocess.run([binary] + args, capture_output=True, text=True, timeout=timeout, cwd=work, env=env, input=body.get('stdin'))
             except subprocess.TimeoutExpired:
@@ -141,7 +157,10 @@ class RunResource:
                         files[rel] = open(fp, errors='replace').read()
                     else:
                         files_b64[rel] = base64.b64encode(open(fp, 'rb').read()).decode()
-            resp.media = {'ok': True, 'engine': engine, 'returncode': run.returncode, 'stdout': run.stdout[-TAIL:], 'stderr': run.stderr[-TAIL:], 'files': files, 'files_b64': files_b64}
+            _c1 = _res.getrusage(_res.RUSAGE_CHILDREN)
+            # rc-1: what THIS call cost on the worker — wall, CPU and the child's peak RSS (rusage; peak = largest child so far in the worker's life)
+            cost = {'wall_s': round(_time.perf_counter() - _t0, 3), 'cpu_s': round((_c1.ru_utime - _c0.ru_utime) + (_c1.ru_stime - _c0.ru_stime), 3), 'peak_rss_mb': round(_c1.ru_maxrss / 1024.0, 1), 'source': 'worker rusage(RUSAGE_CHILDREN) around the engine'}
+            resp.media = {'ok': True, 'engine': engine, 'cost': cost, 'returncode': run.returncode, 'stdout': run.stdout[-TAIL:], 'stderr': run.stderr[-TAIL:], 'files': files, 'files_b64': files_b64}
         finally:
             shutil.rmtree(work, ignore_errors=True)
 

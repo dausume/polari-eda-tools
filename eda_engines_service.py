@@ -30,16 +30,23 @@ ENGINES = {
     'yosys': 'yosys', 'iverilog': 'iverilog', 'vvp': 'vvp', 'verilator': 'verilator',
     'nextpnr-ice40': 'nextpnr-ice40', 'icepack': 'icepack', 'icetime': 'icetime',
     'sta': 'sta', 'magic': 'magic', 'netgen': 'netgen-lvs',
+    'orfs': 'make', 'openroad': 'openroad',   # eng-1: only where the OpenROAD flow tree exists (a worker built FROM openroad/orfs) — guarded in _which
 }
+ORFS_FLOW = '/OpenROAD-flow-scripts/flow'
+WORKER_KIND = os.environ.get('WORKER_KIND', 'eda')   # 'eda' (the toolchain image) | 'orfs' (built FROM the OpenROAD flow image)
+MAX_FILE_BYTES = int(os.environ.get('WORKER_MAX_MB', '64')) * 1024 * 1024
 VERSION_ARGS = {'riscv-gcc': ['--version'], 'riscv-objdump': ['--version'], 'yosys': ['-V'], 'iverilog': ['-V'], 'vvp': ['-V'], 'verilator': ['--version'],
                 'nextpnr-ice40': ['--version'], 'icepack': [], 'icetime': [], 'sta': ['-version'], 'magic': ['--version'], 'netgen': ['-batch', 'quit']}
 PDK_ROOT = os.environ.get('PDK_ROOT', '/pdk')
-MAX_FILE_BYTES = 64 * 1024 * 1024
 TAIL = 20000
 TEXT_EXT = ('.v', '.sv', '.c', '.s', '.S', '.o.txt', '.json', '.log', '.lib', '.lef', '.spice', '.sp', '.tcl', '.txt', '.out', '.asc', '.ext', '.mag', '.rpt', '.md', '.dat', '.sh', '.lst')
 
 
 def _which(engine):
+    if engine == 'orfs':   # `make` exists in every image; the FLOW does not — never claim orfs without its Makefile
+        return shutil.which('make') if os.path.exists(os.path.join(ORFS_FLOW, 'Makefile')) else None
+    if engine == 'openroad' and not os.path.exists(os.path.join(ORFS_FLOW, 'Makefile')):
+        return None
     return shutil.which(ENGINES.get(engine, ''))
 
 
@@ -74,8 +81,14 @@ def _pdk():
     return {'present': os.path.exists(tech), 'root': PDK_ROOT, 'version': open(vp).read().strip() if os.path.exists(vp) else ''}
 
 
+def _resources_block():
+    if WORKER_KIND == 'orfs':
+        return {'ramMb': 1500, 'minThreads': 1, 'threadCeiling': 4, 'cpuBenefit': 'sublinear', 'imageMb': 4690, 'fidelity': 'declared', 'note': 'res-2 block (eng-1): the OpenROAD flow worker built FROM openroad/orfs; the adder flow measured 527 MB peak / 68 CPU-s'}
+    return {'ramMb': 600, 'minThreads': 1, 'threadCeiling': 2, 'cpuBenefit': 'sublinear', 'imageMb': 2560, 'fidelity': 'declared', 'note': 'res-2 block (rc-1): declared floor of the eda toolchain worker; measured peaks come from the flows\' cgroup meters'}
+
+
 def _capability():
-    return {'resources': {'ramMb': 600, 'minThreads': 1, 'threadCeiling': 2, 'cpuBenefit': 'sublinear', 'imageMb': 2560, 'fidelity': 'declared', 'note': 'res-2 block (rc-1): declared floor of the eda toolchain worker; measured peaks come from the flows\' cgroup meters'}, 'worker': 'eda-engines', 'engines': {e: {'available': bool(_which(e)), 'version': _version(e), 'binary': ENGINES[e]} for e in ENGINES}, 'pdk': _pdk(),
+    return {'resources': _resources_block(), 'worker': 'orfs-engines' if WORKER_KIND == 'orfs' else 'eda-engines', 'engines': {e: {'available': bool(_which(e)), 'version': _version(e), 'binary': ENGINES[e]} for e in ENGINES}, 'pdk': _pdk(),
             'protocol': 'POST /run {engine, args, files, files_b64, env, timeout} — argv only, files round-trip'}
 
 
@@ -84,12 +97,15 @@ def _bad(resp, msg, status=falcon.HTTP_400):
 
 
 def _safe_arg(a):
-    """A job argument: a basename/relative path inside the job, or read-only data the image itself ships (the PDK
-    volume, a tool's share dir such as yosys's simlib.v). Never '..', never another absolute path."""
-    a = str(a)
-    if a.startswith('/pdk/') or a.startswith('/usr/share/'):
-        return '..' not in a
-    return '..' not in a and not a.startswith('/')
+    """basenames inside the job, /pdk/… and /usr/share/… (the image's read-only data), the OpenROAD flow tree when present,
+    and the `{work}` token (eng-1: replaced by the job dir — the ORFS flow needs absolute DESIGN_CONFIG / WORK_HOME paths)."""
+    a = a.replace('{work}', 'W')
+    if '..' in a:
+        return False
+    for part in a.split('='):
+        if part.startswith('/') and not (part.startswith('/pdk/') or part.startswith('/usr/share/') or (part.startswith(ORFS_FLOW) and os.path.exists(ORFS_FLOW)) or part.startswith('/OpenROAD-flow-scripts/') and os.path.exists(ORFS_FLOW)):
+            return False
+    return True
 
 
 class CapabilityResource:
@@ -108,7 +124,7 @@ class SystemInfoResource:
                     info[parts[0].rstrip(':')] = int(parts[1]) * 1024
         except Exception:
             pass
-        resp.media = {'ok': True, 'worker': 'eda-engines', 'process': _process_block(), 'cpus': os.cpu_count(), 'memTotalBytes': info.get('MemTotal', 0), 'memAvailableBytes': info.get('MemAvailable', 0), 'platform': platform.platform()}
+        resp.media = {'ok': True, 'worker': 'orfs-engines' if WORKER_KIND == 'orfs' else 'eda-engines', 'process': _process_block(), 'cpus': os.cpu_count(), 'memTotalBytes': info.get('MemTotal', 0), 'memAvailableBytes': info.get('MemAvailable', 0), 'platform': platform.platform()}
 
 
 class RunResource:
@@ -122,7 +138,7 @@ class RunResource:
             return _bad(resp, '%s absent in this worker' % engine, falcon.HTTP_503)
         args = [str(a) for a in (body.get('args') or [])]
         if not all(_safe_arg(a) for a in args):
-            return _bad(resp, 'args must be basenames inside the job (or /pdk/…): %s' % args)
+            return _bad(resp, 'args must be basenames inside the job, /pdk/…, {work}/… or the flow tree: %s' % args)
         timeout = min(float(body.get('timeout', 900) or 900), 3600.0)
         work = tempfile.mkdtemp(prefix='eda-')
         try:
@@ -133,6 +149,7 @@ class RunResource:
             for name, b64 in (body.get('files_b64') or {}).items():
                 with open(os.path.join(work, os.path.basename(name)), 'wb') as fh:
                     fh.write(base64.b64decode(b64))
+            args = [a.replace('{work}', work) for a in args]   # eng-1: the job dir, where the caller wrote `{work}`
             env = dict(os.environ, HOME=work, PDK_ROOT=PDK_ROOT)
             for k, v in (body.get('env') or {}).items():
                 if str(k).isidentifier():
@@ -152,7 +169,7 @@ class RunResource:
                         continue
                     size = os.path.getsize(fp); total += size
                     if total > MAX_FILE_BYTES:
-                        return _bad(resp, 'outputs exceed the 64 MB cap', falcon.HTTP_413)
+                        return _bad(resp, 'outputs exceed the %d MB cap (WORKER_MAX_MB)' % (MAX_FILE_BYTES // (1024 * 1024)), falcon.HTTP_413)
                     if rel.endswith(TEXT_EXT) or size < 2_000_000 and _is_text(fp):
                         files[rel] = open(fp, errors='replace').read()
                     else:

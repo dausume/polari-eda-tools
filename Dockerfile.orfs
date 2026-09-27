@@ -1,0 +1,16 @@
+# polari-eda-tools/Dockerfile.orfs — eng-1 (2026-09-26): the OpenROAD-flow-scripts WORKER, built FROM the pinned published image
+# (used as published, never rebuilt — LICENSES.md audits it as the second engine image: OpenROAD BSD-3, ORFS BSD-3, yosys ISC,
+# kepler-formal + KLayout GPL-3 not invoked, sky130hd platform Apache-2.0). The SAME service as eda-engines with WORKER_KIND=orfs:
+# engines `orfs` (make on the flow) and `openroad`, the {work} job-dir token, files round-trip, res-2/res-3 blocks, per-call cost.
+#
+#   docker build -f Dockerfile.orfs -t prf-orfs-engines:staging .      # ~50 MB on top of the 4.6 GB base
+#   docker run --rm -p 9801:9801 prf-orfs-engines:staging
+ARG ORFS_TAG=26Q3-651-gbc334a4aa
+FROM openroad/orfs:${ORFS_TAG}
+RUN pip install --no-cache-dir falcon gunicorn psutil
+ENV PATH=/OpenROAD-flow-scripts/tools/install/OpenROAD/bin:/OpenROAD-flow-scripts/tools/install/yosys/bin:/OpenROAD-flow-scripts/tools/install/kepler-formal/bin:$PATH
+ENV WORKER_KIND=orfs WORKER_MAX_MB=256
+COPY eda_engines_service.py /srv/eda_engines_service.py
+WORKDIR /w
+EXPOSE 9801
+CMD ["gunicorn", "-b", "0.0.0.0:9801", "-w", "1", "-t", "3600", "--chdir", "/srv", "eda_engines_service:app"]

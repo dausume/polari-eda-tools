@@ -10,7 +10,7 @@
 #                             noble package (8.3.105) is older than the sky130A tech file requires (>= 8.3.411)
 #   netgen-lvs                GPL "any version"             layout-vs-schematic (lod-3c; binary: netgen-lvs)
 #   ciel                      Apache-2.0                    fetches a BUILT open PDK (sky130A) at a pinned version
-#   OpenSTA                   GPL-3.0                       static timing (the openroad/opensta binary, copied)
+#   OpenSTA 3.1.0 (6be0b1d7)  GPL-3.0                       static timing (the openroad/opensta binary, copied; PINNED by digest below)
 #
 #   docker build -t polari-eda-tools:noble .
 #   ./fetch-pdk.sh                  # sky130A (sc_hd + fd_pr only) into $POLARI_PDK_ROOT (never in git, never in the image)
@@ -18,7 +18,11 @@
 # OpenSTA (GPL-3.0, a separate process) comes from the openroad/opensta image — the same binary the suite has
 # always timed with — copied with the one library noble does not ship (tclreadline is in apt; the binary is
 # jammy-built and runs on noble's newer glibc). One image = every engine the compute ladder names.
-FROM openroad/opensta AS opensta
+# PINNED 2026-10-29 (was the floating `openroad/opensta`, whose `latest` is now Ubuntu 26.04-built): tag 6be0b1d7 = OpenSTA 3.1.0 commit 6be0b1d7da, the build
+# every committed lod-3 timing log cites ("OpenSTA 3.1.0 6be0b1d7da"); its /OpenSTA/build/sta sha256 fd33efa87c2b6823… equals the binary in the image those
+# results came from (prf-eda-engines:staging built 2026-09-24), checked byte for byte. Jammy (22.04)-built, runs on noble.
+ARG OPENSTA_REF=6be0b1d7@sha256:1ccad8abdfb535a501554e7c6172ad4a6874e4e4ccb4b3b19567e717c72c3934
+FROM openroad/opensta:${OPENSTA_REF} AS opensta
 
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive

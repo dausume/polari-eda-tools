@@ -5,7 +5,9 @@
 #
 #   docker build -f Dockerfile.orfs -t prf-orfs-engines:staging .      # ~50 MB on top of the 4.6 GB base
 #   docker run --rm -p 9801:9801 prf-orfs-engines:staging
-ARG ORFS_TAG=26Q3-651-gbc334a4aa
+# PINNED BY DIGEST 2026-10-29: Docker Hub's digest for tag 26Q3-651-gbc334a4aa; its 25 layer diff_ids equal the first 25 layers of the local
+# prf-orfs-engines:staging the measured flows ran on (checked against the registry's image config, no pull)
+ARG ORFS_TAG=26Q3-651-gbc334a4aa@sha256:69df744e2b5ce26a14950713fd2d74b96ec8c9bd8351d2719f9bb200388239ad
 FROM openroad/orfs:${ORFS_TAG}
 RUN pip install --no-cache-dir falcon gunicorn psutil
 ENV PATH=/OpenROAD-flow-scripts/tools/install/OpenROAD/bin:/OpenROAD-flow-scripts/tools/install/yosys/bin:/OpenROAD-flow-scripts/tools/install/kepler-formal/bin:$PATH
